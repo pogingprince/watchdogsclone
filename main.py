@@ -19,7 +19,13 @@ ZONE_DETECTED_COLOR = (180, 0, 0, 200) # Brighter Dark Red, semi-transparent for
 # For now, using solid colors for zones as per plan
 SOLID_ZONE_NORMAL_COLOR = (100, 0, 0)
 SOLID_ZONE_DETECTED_COLOR = (180, 0, 0)
-PLAYER_SPEED = 5
+PLAYER_SPEED = 3 # Reduced player speed from 5 to 3
+
+# UI Settings
+UI_FONT_SIZE = 28
+UI_TEXT_COLOR = (230, 230, 230) # Light grey/white
+UI_PANEL_COLOR = (30, 30, 30) # Dark background for UI
+UI_FONT = None # Will be initialized after pygame.init()
 
 # World dimensions
 WORLD_WIDTH = 1600
@@ -101,6 +107,16 @@ class SecurityZone:
     def update(self, player_rect):
         self.player_is_inside = self.rect.colliderect(player_rect)
 
+# Weapon class
+class Weapon:
+    def __init__(self, name, weapon_type, ammo, max_ammo, clip_size, current_clip_ammo):
+        self.name = name
+        self.weapon_type = weapon_type
+        self.ammo = ammo
+        self.max_ammo = max_ammo
+        self.clip_size = clip_size
+        self.current_clip_ammo = current_clip_ammo
+
 # Player class
 class Player:
     def __init__(self):
@@ -117,6 +133,82 @@ class Player:
             self.height
         )
         self.speed = PLAYER_SPEED
+        self.inventory = []
+        self.show_arsenal = False # Attribute to control arsenal display
+        self.selected_weapon_index = 0
+        self.current_weapon = None # Will be set after inventory initialization
+        self._initialize_starting_inventory()
+        # Ensure current_weapon is set if inventory is not empty
+        if self.inventory:
+            self.current_weapon = self.inventory[self.selected_weapon_index]
+
+
+    def _initialize_starting_inventory(self):
+        # Create "1911" pistol
+        pistol_1911 = Weapon(
+            name="1911",
+            weapon_type="firearm",
+            ammo=30,
+            max_ammo=90,
+            clip_size=10,
+            current_clip_ammo=10
+        )
+        self.inventory.append(pistol_1911)
+
+        # Create IEDs (one object with ammo=3)
+        ied_explosive = Weapon(
+            name="IED",
+            weapon_type="explosive",
+            ammo=3,
+            max_ammo=3,
+            clip_size=None, # IEDs don't have clips
+            current_clip_ammo=None # No clip, so no ammo in clip
+        )
+        self.inventory.append(ied_explosive)
+
+    def select_weapon(self, index):
+        if 0 <= index < len(self.inventory):
+            self.selected_weapon_index = index
+            self.current_weapon = self.inventory[self.selected_weapon_index]
+        # else: print(f"Invalid weapon index: {index}") # Optional: for debugging
+
+    def draw_arsenal(self, surface):
+        if not self.show_arsenal:
+            return
+
+        panel_x, panel_y = 10, 10
+        panel_width = 250
+        # Dynamically adjust panel height based on number of items, or use a fixed height
+        num_items = len(self.inventory)
+        panel_height = 30 + num_items * 30 # Base height + per item height
+
+        # Draw background panel
+        pygame.draw.rect(surface, UI_PANEL_COLOR, (panel_x, panel_y, panel_width, panel_height))
+
+        text_y_offset = 15 # Initial y offset from panel's top
+        line_height = 30   # Space between lines of text
+
+        for weapon in self.inventory:
+            display_text = ""
+            if weapon.weapon_type == "firearm":
+                display_text = f"{weapon.name}: {weapon.current_clip_ammo}/{weapon.ammo}"
+            elif weapon.weapon_type == "explosive":
+                display_text = f"{weapon.name}: {weapon.ammo}"
+            else:
+                display_text = f"{weapon.name}: N/A" # Fallback for other types
+
+            text_surface = UI_FONT.render(display_text, True, UI_TEXT_COLOR)
+            surface.blit(text_surface, (panel_x + 10, panel_y + text_y_offset))
+            text_y_offset += line_height
+
+    def draw_current_weapon_indicator(self, surface):
+        if self.current_weapon:
+            display_text = f"Selected: {self.current_weapon.name}"
+            text_surface = UI_FONT.render(display_text, True, UI_TEXT_COLOR)
+            # Position at bottom-center of the screen
+            text_x = SCREEN_WIDTH // 2 - text_surface.get_width() // 2
+            text_y = SCREEN_HEIGHT - 40 # 40 pixels from the bottom
+            surface.blit(text_surface, (text_x, text_y))
 
     def draw(self, surface, display_rect): # display_rect is the camera-adjusted rect
         current_color = self.detected_color if self.is_detected else self.normal_color
@@ -150,6 +242,9 @@ pygame.display.set_caption(SCREEN_TITLE)
 player = Player()
 # Create camera instance
 camera = Camera(WORLD_WIDTH, WORLD_HEIGHT)
+
+# Initialize Font (must be done after pygame.init())
+UI_FONT = pygame.font.Font(None, UI_FONT_SIZE)
 
 # Create environment objects
 environment_objects = [
@@ -186,6 +281,13 @@ while running:
                 for cam_obj in camera_objects:
                     if player.rect.colliderect(cam_obj.rect):
                         cam_obj.hack()
+            elif event.key == pygame.K_l: # Toggle arsenal display
+                player.show_arsenal = not player.show_arsenal
+            elif event.key == pygame.K_1:
+                player.select_weapon(0)
+            elif event.key == pygame.K_2:
+                player.select_weapon(1)
+            # Add more keys (K_3, K_4, etc.) if more weapons can be carried
 
     # Get pressed keys
     pressed_keys = pygame.key.get_pressed()
@@ -221,6 +323,12 @@ while running:
 
     # Draw player (using camera.apply to get screen coordinates)
     player.draw(screen, camera.apply(player.rect))
+
+    # Draw Arsenal UI (on top of everything else)
+    player.draw_arsenal(screen)
+
+    # Draw Current Weapon Indicator
+    player.draw_current_weapon_indicator(screen)
 
     # Update the display
     pygame.display.flip()
