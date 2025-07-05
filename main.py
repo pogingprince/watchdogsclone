@@ -63,24 +63,48 @@ class Camera:
 
 # EnvironmentObject class
 class EnvironmentObject:
-    def __init__(self, x, y, width, height, color):
+    def __init__(self, x, y, width, height, color): # Color argument is kept for now, might be removed if sprite is self-sufficient
         self.rect = pygame.Rect(x, y, width, height)
-        self.color = color
+        # self.color = color # Color may not be needed if using sprites
+        try:
+            self.image = pygame.image.load("environment_object.png").convert_alpha()
+            self.image = pygame.transform.scale(self.image, (width, height))
+        except pygame.error as e:
+            print(f"Warning: Failed to load environment_object.png: {e}. Drawing color placeholder.")
+            self.image = None
+            self.color = OBJECT_COLOR # Fallback color
 
     def draw(self, surface, display_rect):
-        pygame.draw.rect(surface, self.color, display_rect)
+        if self.image:
+            surface.blit(self.image, display_rect)
+        else:
+            pygame.draw.rect(surface, self.color, display_rect) # Fallback drawing
 
 # CameraObject class
 class CameraObject:
-    def __init__(self, x, y, width, height, color, hacked_color):
+    def __init__(self, x, y, width, height, color, hacked_color): # color args kept for fallback
         self.rect = pygame.Rect(x, y, width, height)
-        self.color = color
-        self.hacked_color = hacked_color
         self.is_hacked = False
+        try:
+            self.normal_image = pygame.image.load("camera_normal.png").convert_alpha()
+            self.normal_image = pygame.transform.scale(self.normal_image, (width, height))
+            self.hacked_image = pygame.image.load("camera_hacked.png").convert_alpha()
+            self.hacked_image = pygame.transform.scale(self.hacked_image, (width, height))
+            self.image_load_success = True
+        except pygame.error as e:
+            print(f"Warning: Failed to load camera images: {e}. Drawing color placeholders.")
+            self.image_load_success = False
+            self.color = color # Fallback normal color
+            self.hacked_color = hacked_color # Fallback hacked color
+
 
     def draw(self, surface, display_rect):
-        current_color = self.hacked_color if self.is_hacked else self.color
-        pygame.draw.rect(surface, current_color, display_rect)
+        if self.image_load_success:
+            current_image = self.hacked_image if self.is_hacked else self.normal_image
+            surface.blit(current_image, display_rect)
+        else:
+            current_color = self.hacked_color if self.is_hacked else self.color
+            pygame.draw.rect(surface, current_color, display_rect) # Fallback drawing
 
     def hack(self):
         self.is_hacked = not self.is_hacked # Toggle state
@@ -89,14 +113,30 @@ class CameraObject:
 class SecurityZone:
     def __init__(self, x, y, width, height, color, detected_color):
         self.rect = pygame.Rect(x, y, width, height)
-        self.color = color
-        self.detected_color = detected_color
+        # Store the RGBA versions of the colors
+        self.normal_color_rgba = ZONE_NORMAL_COLOR
+        self.detected_color_rgba = ZONE_DETECTED_COLOR
+        # Fallback solid colors if issues occur (though RGBA should work fine)
+        self.normal_color_solid = SOLID_ZONE_NORMAL_COLOR
+        self.detected_color_solid = SOLID_ZONE_DETECTED_COLOR
         self.player_is_inside = False
 
+        # Create persistent surfaces for transparency to avoid creating them every frame
+        # display_rect passed to draw() has its size determined by camera logic,
+        # but the actual zone's width/height are from self.rect.
+        # We need to draw onto a surface that has the same dimensions as the zone itself.
+        self.zone_surface = pygame.Surface((self.rect.width, self.rect.height), pygame.SRCALPHA)
+
     def draw(self, surface, display_rect):
-        current_color = self.detected_color if self.player_is_inside else self.color
-        # For now, drawing solid rects. Transparency would need a separate surface.
-        pygame.draw.rect(surface, current_color, display_rect)
+        # Choose color based on player presence (using RGBA versions)
+        current_color_rgba = self.detected_color_rgba if self.player_is_inside else self.normal_color_rgba
+
+        # Fill the zone_surface with the chosen transparent color
+        # The surface is filled from (0,0) up to its own width/height
+        self.zone_surface.fill(current_color_rgba)
+
+        # Blit this transparent surface onto the main screen at the display_rect's top-left position
+        surface.blit(self.zone_surface, display_rect.topleft)
 
     def update(self, player_rect):
         self.player_is_inside = self.rect.colliderect(player_rect)
@@ -106,8 +146,8 @@ class Player:
     def __init__(self):
         self.width = 30
         self.height = 30
-        self.normal_color = LIGHT_BLUE # Original player color
-        self.detected_color = PLAYER_DETECTED_COLOR
+        # self.normal_color = LIGHT_BLUE # Will be replaced by normal_image
+        # self.detected_color = PLAYER_DETECTED_COLOR # Will be replaced by detected_image
         self.is_detected = False
         # Player starts in the middle of the world
         self.rect = pygame.Rect(
@@ -118,9 +158,27 @@ class Player:
         )
         self.speed = PLAYER_SPEED
 
+        try:
+            self.normal_image = pygame.image.load("player_normal.png").convert_alpha()
+            self.normal_image = pygame.transform.scale(self.normal_image, (self.width, self.height))
+            self.detected_image = pygame.image.load("player_detected.png").convert_alpha()
+            self.detected_image = pygame.transform.scale(self.detected_image, (self.width, self.height))
+            self.image_load_success = True
+        except pygame.error as e:
+            print(f"Warning: Failed to load player images: {e}. Drawing color placeholders.")
+            self.image_load_success = False
+            # Fallback colors if images fail to load
+            self.normal_color_fallback = LIGHT_BLUE
+            self.detected_color_fallback = PLAYER_DETECTED_COLOR
+
     def draw(self, surface, display_rect): # display_rect is the camera-adjusted rect
-        current_color = self.detected_color if self.is_detected else self.normal_color
-        pygame.draw.rect(surface, current_color, display_rect)
+        if self.image_load_success:
+            current_image = self.detected_image if self.is_detected else self.normal_image
+            surface.blit(current_image, display_rect)
+        else:
+            # Fallback drawing if images failed to load
+            current_color = self.detected_color_fallback if self.is_detected else self.normal_color_fallback
+            pygame.draw.rect(surface, current_color, display_rect)
 
     def update(self, pressed_keys):
         if pressed_keys[pygame.K_LEFT]:
