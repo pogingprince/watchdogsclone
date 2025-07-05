@@ -19,13 +19,24 @@ ZONE_DETECTED_COLOR = (180, 0, 0, 200) # Brighter Dark Red, semi-transparent for
 # For now, using solid colors for zones as per plan
 SOLID_ZONE_NORMAL_COLOR = (100, 0, 0)
 SOLID_ZONE_DETECTED_COLOR = (180, 0, 0)
-PLAYER_SPEED = 3 # Reduced player speed from 5 to 3
+PLAYER_SPEED = 1 # Further reduced player speed from 3 to 1 (original was 5)
 
 # UI Settings
 UI_FONT_SIZE = 28
 UI_TEXT_COLOR = (230, 230, 230) # Light grey/white
 UI_PANEL_COLOR = (30, 30, 30) # Dark background for UI
 UI_FONT = None # Will be initialized after pygame.init()
+
+# Game Mechanics Settings
+BULLET_COLOR = (255, 255, 0) # Yellow - Retained
+BULLET_SPEED = 10
+BULLET_SIZE = (6, 8) # Changed from (5,5) for better visibility and slight elongation
+EXPLOSION_INITIAL_COLOR = (255, 255, 0) # Yellow - Retained
+EXPLOSION_MIDDLE_COLOR = (255, 165, 0) # Orange - Retained
+EXPLOSION_FINAL_COLOR = (255, 0, 0) # Red - Retained
+EXPLOSION_DURATION = 35 # Changed from 30 for slightly longer persistence
+EXPLOSION_INITIAL_RADIUS = 5
+EXPLOSION_MAX_RADIUS = 60 # Changed from 50 for a larger impact area
 
 # World dimensions
 WORLD_WIDTH = 1600
@@ -55,7 +66,7 @@ class Camera:
         # Camera's bottom edge should not exceed world_height
         if self.camera_rect.bottom > self.world_height:
             self.camera_rect.bottom = self.world_height
-        
+
         # Handle cases where world is smaller than screen
         if self.world_width < SCREEN_WIDTH:
             self.camera_rect.x = (self.world_width - SCREEN_WIDTH) // 2
@@ -107,6 +118,68 @@ class SecurityZone:
     def update(self, player_rect):
         self.player_is_inside = self.rect.colliderect(player_rect)
 
+# Bullet class
+class Bullet:
+    def __init__(self, x, y, direction_x, direction_y, speed, color):
+        self.rect = pygame.Rect(x, y, BULLET_SIZE[0], BULLET_SIZE[1])
+        self.direction_x = direction_x
+        self.direction_y = direction_y
+        self.speed = speed
+        self.color = color
+
+    def update(self):
+        self.rect.x += self.direction_x * self.speed
+        self.rect.y += self.direction_y * self.speed
+
+    def draw(self, surface, display_rect):
+        pygame.draw.rect(surface, self.color, display_rect)
+
+# Explosion class
+class Explosion:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.current_radius = EXPLOSION_INITIAL_RADIUS
+        self.life = EXPLOSION_DURATION
+        # Initial rect for camera.apply, will be updated
+        self.rect = pygame.Rect(
+            x - self.current_radius,
+            y - self.current_radius,
+            2 * self.current_radius,
+            2 * self.current_radius
+        )
+
+    def update(self):
+        self.life -= 1
+        if self.life <= 0:
+            return
+
+        progress = (EXPLOSION_DURATION - self.life) / EXPLOSION_DURATION
+        self.current_radius = EXPLOSION_INITIAL_RADIUS + progress * (EXPLOSION_MAX_RADIUS - EXPLOSION_INITIAL_RADIUS)
+
+        # Update self.rect for camera application
+        self.rect.width = 2 * self.current_radius
+        self.rect.height = 2 * self.current_radius
+        self.rect.centerx = self.x
+        self.rect.centery = self.y
+
+
+    def draw(self, surface, display_rect):
+        # display_rect is camera.apply(self.rect)
+        # We need to draw the circle at the center of this camera-adjusted rect
+
+        color = EXPLOSION_FINAL_COLOR
+        if self.life > (2/3 * EXPLOSION_DURATION):
+            color = EXPLOSION_INITIAL_COLOR
+        elif self.life > (1/3 * EXPLOSION_DURATION):
+            color = EXPLOSION_MIDDLE_COLOR
+
+        # Ensure radius is an integer for drawing
+        draw_radius = int(self.current_radius)
+        if draw_radius > 0: # Only draw if radius is positive
+             pygame.draw.circle(surface, color, display_rect.center, draw_radius)
+
+
 # Weapon class
 class Weapon:
     def __init__(self, name, weapon_type, ammo, max_ammo, clip_size, current_clip_ammo):
@@ -137,6 +210,8 @@ class Player:
         self.show_arsenal = False # Attribute to control arsenal display
         self.selected_weapon_index = 0
         self.current_weapon = None # Will be set after inventory initialization
+        self.bullets = [] # List to store active bullets
+        self.explosions = [] # List to store active explosions
         self._initialize_starting_inventory()
         # Ensure current_weapon is set if inventory is not empty
         if self.inventory:
@@ -171,6 +246,59 @@ class Player:
             self.selected_weapon_index = index
             self.current_weapon = self.inventory[self.selected_weapon_index]
         # else: print(f"Invalid weapon index: {index}") # Optional: for debugging
+
+    def fire_weapon(self):
+        if self.current_weapon and self.current_weapon.name == "1911":
+            if self.current_weapon.current_clip_ammo > 0:
+                self.current_weapon.current_clip_ammo -= 1
+
+                # For now, bullet shoots upwards from player center
+                # A more sophisticated approach would consider player orientation
+                bullet_start_x = self.rect.centerx - BULLET_SIZE[0] // 2
+                bullet_start_y = self.rect.top # Fires from the top-middle of the player
+
+                new_bullet = Bullet(
+                    bullet_start_x,
+                    bullet_start_y,
+                    0,  # direction_x (0 for straight up)
+                    -1, # direction_y (-1 for up)
+                    BULLET_SPEED,
+                    BULLET_COLOR
+                )
+                self.bullets.append(new_bullet)
+            # else: print("1911 empty clip!") # For debugging
+        elif self.current_weapon and self.current_weapon.name == "IED":
+            if self.current_weapon.ammo > 0:
+                self.current_weapon.ammo -= 1
+                explosion_x = self.rect.centerx
+                explosion_y = self.rect.centery
+                new_explosion = Explosion(explosion_x, explosion_y)
+                self.explosions.append(new_explosion)
+                # print(f"Deployed IED. Remaining: {self.current_weapon.ammo}") # For debugging
+            # else: print("No IEDs left!") # For debugging
+        # else: print("No weapon selected or unknown weapon.") # For debugging
+
+    def reload_weapon(self):
+        if self.current_weapon and self.current_weapon.weapon_type == "firearm":
+            if self.current_weapon.clip_size is None: # Not a clippable weapon (e.g. some shotguns)
+                # print(f"{self.current_weapon.name} does not use clips.")
+                return
+
+            if self.current_weapon.current_clip_ammo < self.current_weapon.clip_size:
+                if self.current_weapon.ammo > 0:
+                    ammo_needed = self.current_weapon.clip_size - self.current_weapon.current_clip_ammo
+                    ammo_to_transfer = min(ammo_needed, self.current_weapon.ammo)
+
+                    self.current_weapon.current_clip_ammo += ammo_to_transfer
+                    self.current_weapon.ammo -= ammo_to_transfer
+                    # print(f"Reloaded {self.current_weapon.name}. Clip: {self.current_weapon.current_clip_ammo}/{self.current_weapon.ammo}") # For debugging
+                # else:
+                    # print("No reserve ammo to reload!") # For debugging
+            # else:
+                # print(f"{self.current_weapon.name} clip is full.") # For debugging
+        # else:
+            # print("No firearm selected to reload.") # For debugging
+
 
     def draw_arsenal(self, surface):
         if not self.show_arsenal:
@@ -287,16 +415,35 @@ while running:
                 player.select_weapon(0)
             elif event.key == pygame.K_2:
                 player.select_weapon(1)
+            elif event.key == pygame.K_SPACE: # Fire weapon
+                player.fire_weapon()
+            elif event.key == pygame.K_r: # Reload weapon
+                player.reload_weapon()
             # Add more keys (K_3, K_4, etc.) if more weapons can be carried
 
     # Get pressed keys
     pressed_keys = pygame.key.get_pressed()
 
+    # --- Game Logic Updates ---
     # Update player
     player.update(pressed_keys)
 
     # Update camera
     camera.update(player.rect)
+
+    # Update bullets
+    for bullet in player.bullets:
+        bullet.update()
+    # Remove bullets that are off-screen (world boundaries)
+    world_bounds_rect = pygame.Rect(0, 0, WORLD_WIDTH, WORLD_HEIGHT)
+    player.bullets = [b for b in player.bullets if world_bounds_rect.colliderect(b.rect)]
+
+    # Update explosions
+    for explosion in player.explosions:
+        explosion.update()
+    # Remove dead explosions
+    player.explosions = [e for e in player.explosions if e.life > 0]
+
 
     # Update security zones and player detection status
     player.is_detected = False # Reset detection status
@@ -320,6 +467,12 @@ while running:
     # Draw camera objects
     for cam_obj in camera_objects:
         cam_obj.draw(screen, camera.apply(cam_obj.rect))
+
+    # Draw bullets and explosions (explosions drawn first, so they are "under" bullets if overlap)
+    for explosion in player.explosions:
+        explosion.draw(screen, camera.apply(explosion.rect))
+    for bullet in player.bullets:
+        bullet.draw(screen, camera.apply(bullet.rect))
 
     # Draw player (using camera.apply to get screen coordinates)
     player.draw(screen, camera.apply(player.rect))
