@@ -1,0 +1,14 @@
+/* Basic styling for the game */
+body {
+    margin: 0;
+    overflow: hidden; /* Hide scrollbars */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    background-color: #323232; /* Corresponds to DARK_GREY */
+}
+
+canvas {
+    border: 1px solid black;
+}
